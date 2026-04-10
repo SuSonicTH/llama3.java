@@ -18,52 +18,6 @@ final class Q4_1FloatTensor extends FloatTensor {
         this.memorySegment = memorySegment;
     }
 
-    @Override
-    int size() {
-        return size;
-    }
-
-    @Override
-    public void setFloat(int index, float value) {
-        throw new UnsupportedOperationException("setFloat");
-    }
-
-    @Override
-    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
-        throw new UnsupportedOperationException("getFloatVector");
-    }
-
-    @Override
-    public GGMLType type() {
-        return GGMLType.Q4_1;
-    }
-
-    @Override
-    public float getFloat(long index) {
-        assert 0 <= index && index < size;
-        long blockIndex = index / GGMLType.Q4_1.getBlockSize();
-        long blockOffset = blockIndex * GGMLType.Q4_1.getTypeSize();
-        float delta = readFloat16(memorySegment, blockOffset);
-        float min = readFloat16(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES);
-        int modIndex = (int) (index % GGMLType.Q4_1.getBlockSize());
-        int quant;
-        if (modIndex < 16) {
-            quant = Byte.toUnsignedInt(readByte(memorySegment, blockOffset + 2L * GGMLType.FLOAT16_BYTES + modIndex)) & 0x0F;
-        } else {
-            quant = (Byte.toUnsignedInt(readByte(memorySegment, blockOffset + 2L * GGMLType.FLOAT16_BYTES + modIndex - 16)) >>> 4) & 0x0F;
-        }
-        return delta * quant + min;
-    }
-
-    @Override
-    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
-        if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
-        } else {
-            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
-        }
-    }
-
     private static float vectorDot(Q4_1FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
         float result = 0f;
         int j = 0;
@@ -134,5 +88,51 @@ final class Q4_1FloatTensor extends FloatTensor {
         }
 
         return result;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.Q4_1;
+    }
+
+    @Override
+    public float getFloat(long index) {
+        assert 0 <= index && index < size;
+        long blockIndex = index / GGMLType.Q4_1.getBlockSize();
+        long blockOffset = blockIndex * GGMLType.Q4_1.getTypeSize();
+        float delta = readFloat16(memorySegment, blockOffset);
+        float min = readFloat16(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES);
+        int modIndex = (int) (index % GGMLType.Q4_1.getBlockSize());
+        int quant;
+        if (modIndex < 16) {
+            quant = Byte.toUnsignedInt(readByte(memorySegment, blockOffset + 2L * GGMLType.FLOAT16_BYTES + modIndex)) & 0x0F;
+        } else {
+            quant = (Byte.toUnsignedInt(readByte(memorySegment, blockOffset + 2L * GGMLType.FLOAT16_BYTES + modIndex - 16)) >>> 4) & 0x0F;
+        }
+        return delta * quant + min;
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        } else {
+            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
+        }
     }
 }

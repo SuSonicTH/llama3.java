@@ -11,12 +11,71 @@ import java.nio.ByteOrder;
 
 final class Q8_0FloatTensor extends FloatTensor {
 
+    public static final ValueLayout.OfShort JAVA_SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN);
     final int size;
     final MemorySegment memorySegment;
 
     public Q8_0FloatTensor(int size, MemorySegment memorySegment) {
         this.size = size;
         this.memorySegment = memorySegment;
+    }
+
+    private static float vectorDot(Q8_0FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
+        float result = 0f;
+        int j = 0;
+
+        // Align thisOffset + startIndex to type().getBlockSize().
+        assert Integer.bitCount(GGMLType.Q8_0.getBlockSize()) == 1 : "power of 2";
+        int alignmentBound = Math.min(size, -thisOffset & (GGMLType.Q8_0.getBlockSize() - 1));
+        if (alignmentBound > 0) {
+            result += FloatTensor.scalarDot(thiz, thisOffset, that, thatOffset, alignmentBound);
+            j += alignmentBound;
+        }
+        assert (thisOffset + j) % GGMLType.Q8_0.getBlockSize() == 0;
+
+        FloatVector val = FloatVector.zero(F_SPECIES);
+        int blockOffset = (thisOffset + j) / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getTypeSize();
+        int upperBound = size / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getBlockSize();
+        for (; j < upperBound; j += GGMLType.Q8_0.getBlockSize(), blockOffset += GGMLType.Q8_0.getTypeSize()) {
+            float wScaleValue = readFloat16(thiz.memorySegment, blockOffset);
+            var wScale = FloatVector.broadcast(F_SPECIES, wScaleValue);
+            switch (F_SPECIES.vectorBitSize()) {
+                case 512 -> {
+                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j).mul(wBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                    val = sum0.add(sum1).fma(wScale, val);
+                }
+                case 256 -> {
+                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j).mul(wBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
+                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
+                    val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                }
+                case 128 -> {
+                    // This loop cannot be unrolled, why?
+                    for (int i = 0; i < 2; ++i) {
+                        var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_128, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + i * ByteVector.SPECIES_128.vectorByteSize(), ByteOrder.LITTLE_ENDIAN);
+                        var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16).mul(wBytes.castShape(F_SPECIES, 0));
+                        var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                        var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
+                        var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
+                        val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                    }
+                }
+                default -> throw new UnsupportedOperationException(F_SPECIES.toString());
+            }
+        }
+        result += val.reduceLanes(VectorOperators.ADD);
+
+        // Remaining entries.
+        if (j < size) {
+            result += FloatTensor.scalarDot(thiz, thisOffset + j, that, thatOffset + j, size - j);
+        }
+
+        return result;
     }
 
     @Override
@@ -50,8 +109,6 @@ final class Q8_0FloatTensor extends FloatTensor {
         return quant * scale;
     }
 
-    public static final ValueLayout.OfShort JAVA_SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN);
-
     @Override
     public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
         if (FloatTensor.USE_VECTOR_API) {
@@ -59,63 +116,5 @@ final class Q8_0FloatTensor extends FloatTensor {
         } else {
             return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
         }
-    }
-
-    private static float vectorDot(Q8_0FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
-        float result = 0f;
-        int j = 0;
-
-        // Align thisOffset + startIndex to type().getBlockSize().
-        assert Integer.bitCount(GGMLType.Q8_0.getBlockSize()) == 1 : "power of 2";
-        int alignmentBound = Math.min(size, -thisOffset & (GGMLType.Q8_0.getBlockSize() - 1));
-        if (alignmentBound > 0) {
-            result += FloatTensor.scalarDot(thiz, thisOffset, that, thatOffset, alignmentBound);
-            j += alignmentBound;
-        }
-        assert (thisOffset + j) % GGMLType.Q8_0.getBlockSize() == 0;
-
-        FloatVector val = FloatVector.zero(F_SPECIES);
-        int blockOffset = (thisOffset + j) / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getTypeSize();
-        int upperBound = size / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getBlockSize();
-        for (; j < upperBound; j += GGMLType.Q8_0.getBlockSize(), blockOffset += GGMLType.Q8_0.getTypeSize()) {
-            float wScaleValue = readFloat16(thiz.memorySegment, blockOffset);
-            var wScale = FloatVector.broadcast(F_SPECIES, wScaleValue);
-            switch (F_SPECIES.vectorBitSize()) {
-                case 512 -> {
-                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
-                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
-                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
-                    val = sum0.add(sum1).fma(wScale, val);
-                }
-                case 256 -> {
-                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
-                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
-                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
-                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
-                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
-                    val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
-                }
-                case 128 -> {
-                    // This loop cannot be unrolled, why?
-                    for (int i = 0; i < 2; ++i) {
-                        var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_128, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + i * ByteVector.SPECIES_128.vectorByteSize(), ByteOrder.LITTLE_ENDIAN);
-                        var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
-                        var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
-                        var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
-                        var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
-                        val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
-                    }
-                }
-                default -> throw new UnsupportedOperationException(F_SPECIES.toString());
-            }
-        }
-        result += val.reduceLanes(VectorOperators.ADD);
-
-        // Remaining entries.
-        if (j < size) {
-            result += FloatTensor.scalarDot(thiz, thisOffset + j, that, thatOffset + j, size - j);
-        }
-
-        return result;
     }
 }

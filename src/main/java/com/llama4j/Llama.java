@@ -10,132 +10,6 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) {
-    public State createNewState(int batchsize) {
-        State state = new State(configuration(), batchsize);
-        state.latestToken = tokenizer.getSpecialTokens().get("<|begin_of_text|>");
-        return state;
-    }
-
-    public static final class Configuration {
-        public final int dim; // transformer dimension
-        public final int hiddenDim; // for ffn layers
-        public final int numberOfLayers; // number of layers
-        public final int numberOfHeads; // number of query heads
-        public final int numberOfKeyValueHeads; // number of key/value heads (can be < query heads because of multiquery)
-        public final int vocabularySize; // vocabulary size, usually 256 (byte-level)
-        public final int contextLength; // max sequence length
-        public final float rmsNormEps;
-        public final float ropeTheta;
-        public final int headSize;
-
-        Configuration withContextLength(int newContextLength) {
-            if (newContextLength < 0) {
-                return this; // no change
-            }
-            return new Configuration(this.dim, this.hiddenDim, this.numberOfLayers, this.numberOfHeads, this.numberOfKeyValueHeads, this.vocabularySize, newContextLength, this.rmsNormEps, this.ropeTheta);
-        }
-
-        public Configuration(int dim, int hiddenDim, int numberOfLayers, int numberOfHeads, int numberOfKeyValueHeads, int vocabularySize, int contextLength, float rmsNormEps, float ropeTheta) {
-            this.dim = dim;
-            this.hiddenDim = hiddenDim;
-            this.numberOfLayers = numberOfLayers;
-            this.numberOfHeads = numberOfHeads;
-            this.numberOfKeyValueHeads = numberOfKeyValueHeads;
-            this.vocabularySize = vocabularySize;
-            this.contextLength = contextLength;
-            this.rmsNormEps = rmsNormEps;
-            this.ropeTheta = ropeTheta;
-            this.headSize = dim / numberOfHeads;
-        }
-    }
-
-    public static final class Weights {
-        // token embedding table
-        public final FloatTensor token_embedding_table; // (vocab_size, dim)
-        // weights for rmsnorms
-        public final FloatBuffer[] rms_att_weight; // (layer, dim) rmsnorm weights
-        // weights for matmuls
-        public final FloatTensor[] wq; // (layer, n_heads * head_size)
-        public final FloatTensor[] wk; // (layer, n_kv_heads, head_size)
-        public final FloatTensor[] wv; // (layer, n_kv_heads * head_size)
-        public final FloatTensor[] wo; // (layer, n_heads * head_size, dim)
-        public final FloatBuffer[] rms_ffn_weight; // (layer, dim)
-        // weights for ffn
-        public final FloatTensor[] w1; // (layer, hidden_dim, dim)
-        public final FloatTensor[] w2; // (layer, dim, hidden_dim)
-        public final FloatTensor[] w3; // (layer, hidden_dim, dim)
-        // public final rmsnorm
-        public final FloatBuffer rms_final_weight; // (dim,)
-        // freq_cis for RoPE relatively positional embeddings
-        public final FloatBuffer freq_cis_real; // (seq_len, head_size/2)
-        public final FloatBuffer freq_cis_imag; // (seq_len, head_size/2)
-        // (optional) classifier weights for the logits, on the last layer
-        public final FloatTensor wcls; // (vocab_size, dim)
-
-        public Weights(FloatTensor token_embedding_table, FloatBuffer[] rms_att_weight, FloatTensor[] wq, FloatTensor[] wk, FloatTensor[] wv, FloatTensor[] wo, FloatBuffer[] rms_ffn_weight, FloatTensor[] w1, FloatTensor[] w2, FloatTensor[] w3, FloatBuffer rms_final_weight, FloatBuffer freq_cis_real, FloatBuffer freq_cis_imag, FloatTensor wcls) {
-            this.token_embedding_table = token_embedding_table;
-            this.rms_att_weight = rms_att_weight;
-            this.wq = wq;
-            this.wk = wk;
-            this.wv = wv;
-            this.wo = wo;
-            this.rms_ffn_weight = rms_ffn_weight;
-            this.w1 = w1;
-            this.w2 = w2;
-            this.w3 = w3;
-            this.rms_final_weight = rms_final_weight;
-            this.freq_cis_real = freq_cis_real;
-            this.freq_cis_imag = freq_cis_imag;
-            this.wcls = wcls;
-        }
-    }
-
-    public static final class State {
-
-        // current wave of activations
-        public final int batchsize;
-        public final FloatTensor[] x; // activation at current time stamp (dim,)
-        public final FloatTensor[] xb; // same, but inside a residual branch (dim,)
-        public final FloatTensor[] xb2; // an additional buffer just for convenience (dim,)
-        public final FloatTensor[] hb; // buffer for hidden dimension in the ffn (hidden_dim,)
-        public final FloatTensor[] hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
-        public final FloatTensor[] q; // query (dim,)
-        public final FloatTensor[] k; // key (dim,)
-        public final FloatTensor[] v; // value (dim,)
-        public final FloatTensor[] att; // buffer for scores/attention values (n_heads, seq_len)
-        public final FloatTensor logits; // output logits
-
-        // kv cache
-        public final FloatTensor[] keyCache;   // (n_layer, seq_len, kv_dim)
-        public final FloatTensor[] valueCache; // (n_layer, seq_len, kv_dim)
-
-        /**
-         * last index in previous block
-         */
-        int idxPrevBlock;
-
-        public int latestToken;
-
-        State(Configuration config, int batchsize) {
-            this.batchsize = batchsize;
-            this.x = allocate(batchsize, config.dim);
-            this.xb = allocate(batchsize, config.dim);
-            this.xb2 = allocate(batchsize, config.dim);
-            this.hb = allocate(batchsize, config.hiddenDim);
-            this.hb2 = allocate(batchsize, config.hiddenDim);
-            this.q = allocate(batchsize, config.dim);
-            this.k = allocate(batchsize, config.dim);
-            this.v = allocate(batchsize, config.dim);
-            this.att = allocate(batchsize, config.numberOfHeads, config.contextLength);
-            idxPrevBlock = -1;
-
-            this.logits = ArrayFloatTensor.allocate(config.vocabularySize);
-            int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
-            this.keyCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
-            this.valueCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
-        }
-    }
-
     static FloatTensor[] allocate(int numTokens, int... dims) {
         return IntStream.range(0, numTokens)
                 .mapToObj(i -> ArrayFloatTensor.allocate(dims))
@@ -387,5 +261,107 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
                 generatedTokens.size() / (genNanos / 1_000_000_000.0), generatedTokens.size());
 
         return generatedTokens;
+    }
+
+    public State createNewState(int batchsize) {
+        State state = new State(configuration(), batchsize);
+        state.latestToken = tokenizer.getSpecialTokens().get("<|begin_of_text|>");
+        return state;
+    }
+
+    public static final class Configuration {
+        public final int dim; // transformer dimension
+        public final int hiddenDim; // for ffn layers
+        public final int numberOfLayers; // number of layers
+        public final int numberOfHeads; // number of query heads
+        public final int numberOfKeyValueHeads; // number of key/value heads (can be < query heads because of multiquery)
+        public final int vocabularySize; // vocabulary size, usually 256 (byte-level)
+        public final int contextLength; // max sequence length
+        public final float rmsNormEps;
+        public final float ropeTheta;
+        public final int headSize;
+
+        public Configuration(int dim, int hiddenDim, int numberOfLayers, int numberOfHeads, int numberOfKeyValueHeads, int vocabularySize, int contextLength, float rmsNormEps, float ropeTheta) {
+            this.dim = dim;
+            this.hiddenDim = hiddenDim;
+            this.numberOfLayers = numberOfLayers;
+            this.numberOfHeads = numberOfHeads;
+            this.numberOfKeyValueHeads = numberOfKeyValueHeads;
+            this.vocabularySize = vocabularySize;
+            this.contextLength = contextLength;
+            this.rmsNormEps = rmsNormEps;
+            this.ropeTheta = ropeTheta;
+            this.headSize = dim / numberOfHeads;
+        }
+
+        Configuration withContextLength(int newContextLength) {
+            if (newContextLength < 0) {
+                return this; // no change
+            }
+            return new Configuration(this.dim, this.hiddenDim, this.numberOfLayers, this.numberOfHeads, this.numberOfKeyValueHeads, this.vocabularySize, newContextLength, this.rmsNormEps, this.ropeTheta);
+        }
+    }
+
+    /**
+     * @param token_embedding_table token embedding table (vocab_size, dim)
+     * @param rms_att_weight        weights for rmsnorms (layer, dim) rmsnorm weights
+     * @param wq                    weights for matmuls (layer, n_heads * head_size)
+     * @param wk                    (layer, n_kv_heads, head_size)
+     * @param wv                    (layer, n_kv_heads * head_size)
+     * @param wo                    (layer, n_heads * head_size, dim)
+     * @param rms_ffn_weight        (layer, dim)
+     * @param w1                    weights for ffn (layer, hidden_dim, dim)
+     * @param w2                    (layer, dim, hidden_dim)
+     * @param w3                    (layer, hidden_dim, dim)
+     * @param rms_final_weight      public final rmsnorm (dim,)
+     * @param freq_cis_real         freq_cis for RoPE relatively positional embeddings (seq_len, head_size/2)
+     * @param freq_cis_imag         (seq_len, head_size/2)
+     * @param wcls                  (optional) classifier weights for the logits, on the last layer (vocab_size, dim)
+     */
+    public record Weights(FloatTensor token_embedding_table, FloatBuffer[] rms_att_weight, FloatTensor[] wq, FloatTensor[] wk, FloatTensor[] wv, FloatTensor[] wo, FloatBuffer[] rms_ffn_weight, FloatTensor[] w1, FloatTensor[] w2, FloatTensor[] w3, FloatBuffer rms_final_weight, FloatBuffer freq_cis_real, FloatBuffer freq_cis_imag, FloatTensor wcls) {
+    }
+
+    public static final class State {
+
+        // current wave of activations
+        public final int batchsize;
+        public final FloatTensor[] x; // activation at current time stamp (dim,)
+        public final FloatTensor[] xb; // same, but inside a residual branch (dim,)
+        public final FloatTensor[] xb2; // an additional buffer just for convenience (dim,)
+        public final FloatTensor[] hb; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor[] hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor[] q; // query (dim,)
+        public final FloatTensor[] k; // key (dim,)
+        public final FloatTensor[] v; // value (dim,)
+        public final FloatTensor[] att; // buffer for scores/attention values (n_heads, seq_len)
+        public final FloatTensor logits; // output logits
+
+        // kv cache
+        public final FloatTensor[] keyCache;   // (n_layer, seq_len, kv_dim)
+        public final FloatTensor[] valueCache; // (n_layer, seq_len, kv_dim)
+        public int latestToken;
+        /**
+         * last index in previous block
+         */
+        int idxPrevBlock;
+
+        State(Configuration config, int batchsize) {
+            this.batchsize = batchsize;
+            this.x = allocate(batchsize, config.dim);
+            this.xb = allocate(batchsize, config.dim);
+            this.xb2 = allocate(batchsize, config.dim);
+            this.hb = allocate(batchsize, config.hiddenDim);
+            this.hb2 = allocate(batchsize, config.hiddenDim);
+            this.q = allocate(batchsize, config.dim);
+            this.k = allocate(batchsize, config.dim);
+            this.v = allocate(batchsize, config.dim);
+            this.att = allocate(batchsize, config.numberOfHeads, config.contextLength);
+            idxPrevBlock = -1;
+
+            this.logits = ArrayFloatTensor.allocate(config.vocabularySize);
+            int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
+            this.keyCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
+            this.valueCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
+        }
     }
 }

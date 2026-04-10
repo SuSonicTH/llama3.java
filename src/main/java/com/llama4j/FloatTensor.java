@@ -24,6 +24,11 @@ abstract class FloatTensor {
 
     // The use of Unsafe in this file is a temporary workaround to support native-image.
     static final Unsafe UNSAFE;
+    // Preferred vector size for the fast multiplication routines.
+    // (Apple Silicon) NEON only supports up-to 128bit vectors.
+    static final VectorSpecies<Float> F_SPECIES;
+    static final VectorSpecies<Integer> I_SPECIES;
+    static final VectorSpecies<Short> S_SPECIES_HALF;
 
     static {
         try {
@@ -32,6 +37,19 @@ abstract class FloatTensor {
             UNSAFE = (Unsafe) f.get(null);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    static {
+        if (USE_VECTOR_API) {
+            F_SPECIES = VectorShape.forBitSize(VECTOR_BIT_SIZE).withLanes(float.class);
+            I_SPECIES = F_SPECIES.withLanes(int.class);
+            S_SPECIES_HALF = VectorShape.forBitSize(F_SPECIES.vectorBitSize() / 2).withLanes(short.class);
+            assert F_SPECIES.length() == S_SPECIES_HALF.length();
+        } else {
+            F_SPECIES = null;
+            I_SPECIES = null;
+            S_SPECIES_HALF = null;
         }
     }
 
@@ -95,35 +113,6 @@ abstract class FloatTensor {
         return Float.intBitsToFloat(outBits);
     }
 
-    // Preferred vector size for the fast multiplication routines.
-    // (Apple Silicon) NEON only supports up-to 128bit vectors.
-    static final VectorSpecies<Float> F_SPECIES;
-    static final VectorSpecies<Integer> I_SPECIES;
-    static final VectorSpecies<Short> S_SPECIES_HALF;
-
-    static {
-        if (USE_VECTOR_API) {
-            F_SPECIES = VectorShape.forBitSize(VECTOR_BIT_SIZE).withLanes(float.class);
-            I_SPECIES = F_SPECIES.withLanes(int.class);
-            S_SPECIES_HALF = VectorShape.forBitSize(F_SPECIES.vectorBitSize() / 2).withLanes(short.class);
-            assert F_SPECIES.length() == S_SPECIES_HALF.length();
-        } else {
-            F_SPECIES = null;
-            I_SPECIES = null;
-            S_SPECIES_HALF = null;
-        }
-    }
-
-    abstract int size();
-
-    abstract float getFloat(long index);
-
-    abstract void setFloat(int index, float value);
-
-    abstract FloatVector getFloatVector(VectorSpecies<Float> species, int offset);
-
-    abstract GGMLType type();
-
     public static int numberOfElements(int... dimensions) {
         assert Arrays.stream(dimensions).allMatch(i -> i > 0);
         return Arrays.stream(dimensions).reduce(Math::multiplyExact).orElseThrow();
@@ -146,6 +135,16 @@ abstract class FloatTensor {
         return result;
     }
 
+    abstract int size();
+
+    abstract float getFloat(long index);
+
+    abstract void setFloat(int index, float value);
+
+    abstract FloatVector getFloatVector(VectorSpecies<Float> species, int offset);
+
+    abstract GGMLType type();
+
     float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
         return scalarDot(this, thisOffset, that, thatOffset, size);
     }
@@ -158,16 +157,11 @@ abstract class FloatTensor {
         if (that.length != out.length) {
             throw new IllegalArgumentException(String.format("that.len=%d, out.len=%d", that.length, out.length));
         }
-        Parallel.parallelForLong(0, dim0 * context, ti -> {
+        Parallel.parallelForLong(0, (long) dim0 * context, ti -> {
             int idxArr = (int) (ti / dim0);
             int i = (int) (ti % dim0);
             out[idxArr].setFloat(i, dot(i * dim1, that[idxArr], 0, dim1));
         });
-    }
-
-    @FunctionalInterface
-    interface AggregateFunction {
-        float apply(float acc, float value);
     }
 
     float reduce(int thisOffset, int size, float seed, AggregateFunction reduce) {
@@ -207,16 +201,6 @@ abstract class FloatTensor {
 
     int argmax() {
         return argmax(0, size());
-    }
-
-    @FunctionalInterface
-    interface MapFunction {
-        float apply(float value);
-    }
-
-    @FunctionalInterface
-    interface MapWithIndexFunction {
-        float apply(float value, int index);
     }
 
     FloatTensor mapInPlace(int thisOffset, int size, MapFunction mapFunction) {
@@ -279,5 +263,20 @@ abstract class FloatTensor {
             setFloat(thisOffset + i, a * that.getFloat(thatOffset + i) + this.getFloat(thisOffset + i));
         }
         return this;
+    }
+
+    @FunctionalInterface
+    interface AggregateFunction {
+        float apply(float acc, float value);
+    }
+
+    @FunctionalInterface
+    interface MapFunction {
+        float apply(float value);
+    }
+
+    @FunctionalInterface
+    interface MapWithIndexFunction {
+        float apply(float value, int index);
     }
 }

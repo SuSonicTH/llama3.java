@@ -21,33 +21,18 @@ final class GGUF {
     // This avoids many tiny FileChannel.read() calls.
     private static final int PARSE_BUFFER_SIZE = 1 << 20;
     private static final List<Integer> SUPPORTED_GGUF_VERSIONS = List.of(3);
+    private final ByteBuffer BB_1 = ByteBuffer.allocate(Byte.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    private final ByteBuffer BB_2 = ByteBuffer.allocate(Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    private final ByteBuffer BB_4 = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    private final ByteBuffer BB_8 = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN);
     private int magic;
     private int version;
     private int tensorCount; // uint64_t
     private int alignment;
     private int metadata_kv_count; // uint64_t
     private Map<String, Object> metadata;
-
-    public Map<String, GGUFTensorInfo> getTensorInfos() {
-        return tensorInfos;
-    }
-
     private Map<String, GGUFTensorInfo> tensorInfos;
-
     private long tensorDataOffset;
-
-    public long getTensorDataOffset() {
-        return tensorDataOffset;
-    }
-
-    public Map<String, Object> getMetadata() {
-        return metadata;
-    }
-
-    private final ByteBuffer BB_1 = ByteBuffer.allocate(Byte.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-    private final ByteBuffer BB_2 = ByteBuffer.allocate(Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-    private final ByteBuffer BB_4 = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-    private final ByteBuffer BB_8 = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN);
     private long parsePosition;
 
     public static GGUF loadModel(FileChannel fileChannel, String modelLabel) throws IOException {
@@ -64,56 +49,32 @@ final class GGUF {
         }
     }
 
-    enum MetadataValueType {
-        // The value is a 8-bit unsigned integer.
-        // (represented as signed byte in Java)
-        UINT8(1),
-        // The value is a 8-bit signed integer.
-        INT8(1),
-        // The value is a 16-bit unsigned little-endian integer.
-        UINT16(2),
-        // The value is a 16-bit signed little-endian integer.
-        INT16(2),
-        // The value is a 32-bit unsigned little-endian integer.
-        UINT32(4),
-        // The value is a 32-bit signed little-endian integer.
-        INT32(4),
-        // The value is a 32-bit IEEE754 floating point number.
-        FLOAT32(4),
-        // The value is a boolean.
-        // 1-byte value where 0 is false and 1 is true.
-        // Anything else is invalid, and should be treated as either the model being invalid or the reader being buggy.
-        // (0 = false, 1 = true)
-        BOOL(1),
-        // The value is a UTF-8 non-null-terminated string, with length prepended.
-        // Variable-size payload (length-prefixed), therefore byteSize is marked as -8.
-        STRING(-8),
-        // The value is an array of other values, with element type and length prepended.
-        // Arrays can be nested.
-        // Variable-size payload, therefore byteSize is marked as -8.
-        ARRAY(-8),
-        // The value is a 64-bit unsigned little-endian integer.
-        UINT64(8),
-        // The value is a 64-bit signed little-endian integer.
-        INT64(8),
-        // The value is a 64-bit IEEE754 floating point number.
-        FLOAT64(8);
-
-        private final int byteSize;
-
-        MetadataValueType(int byteSize) {
-            this.byteSize = byteSize;
+    public static Map<String, GGMLTensorEntry> loadTensors(FileChannel fileChannel, long tensorDataOffset, Map<String, GGUFTensorInfo> tensorInfos) throws IOException {
+        // Global arena keeps tensor mmap slices alive for the process lifetime.
+        // (Arena.ofAuto() can release too early when references outlive parsing scope.)
+        Arena arena = Arena.global();
+        MemorySegment tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
+        Map<String, GGMLTensorEntry> tensorEntries = HashMap.newHashMap(tensorInfos.size());
+        for (Map.Entry<String, GGUFTensorInfo> entry : tensorInfos.entrySet()) {
+            GGUFTensorInfo ti = entry.getValue();
+            long numberOfElements = FloatTensor.numberOfElementsLong(ti.dimensions());
+            long sizeInBytes = ti.ggmlType().byteSizeFor(numberOfElements);
+            MemorySegment memorySegment = tensorData.asSlice(ti.offset(), sizeInBytes);
+            tensorEntries.put(ti.name(), new GGMLTensorEntry(tensorData, ti.name(), ti.ggmlType(), ti.dimensions(), memorySegment));
         }
+        return tensorEntries;
+    }
 
-        private static final MetadataValueType[] VALUES = values();
+    public Map<String, GGUFTensorInfo> getTensorInfos() {
+        return tensorInfos;
+    }
 
-        public static MetadataValueType fromIndex(int index) {
-            return VALUES[index];
-        }
+    public long getTensorDataOffset() {
+        return tensorDataOffset;
+    }
 
-        public int byteSize() {
-            return byteSize;
-        }
+    public Map<String, Object> getMetadata() {
+        return metadata;
     }
 
     private void loadModelImpl(ReadableByteChannel channel) throws IOException {
@@ -147,25 +108,6 @@ final class GGUF {
         // should be padded to `ALIGNMENT` bytes.
         // uint8_t tensor_data[];
         this.tensorDataOffset = parsePosition;
-    }
-
-    public static Map<String, GGMLTensorEntry> loadTensors(FileChannel fileChannel, long tensorDataOffset, Map<String, GGUFTensorInfo> tensorInfos) throws IOException {
-        // Global arena keeps tensor mmap slices alive for the process lifetime.
-        // (Arena.ofAuto() can release too early when references outlive parsing scope.)
-        Arena arena = Arena.global();
-        MemorySegment tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
-        Map<String, GGMLTensorEntry> tensorEntries = HashMap.newHashMap(tensorInfos.size());
-        for (Map.Entry<String, GGUFTensorInfo> entry : tensorInfos.entrySet()) {
-            GGUFTensorInfo ti = entry.getValue();
-            long numberOfElements = FloatTensor.numberOfElementsLong(ti.dimensions());
-            long sizeInBytes = ti.ggmlType().byteSizeFor(numberOfElements);
-            MemorySegment memorySegment = tensorData.asSlice(ti.offset(), sizeInBytes);
-            tensorEntries.put(ti.name(), new GGMLTensorEntry(tensorData, ti.name(), ti.ggmlType(), ti.dimensions(), memorySegment));
-        }
-        return tensorEntries;
-    }
-
-    public record GGUFTensorInfo(String name, int[] dimensions, GGMLType ggmlType, long offset) {
     }
 
     private GGMLType readGGMLType(ReadableByteChannel channel) throws IOException {
@@ -431,5 +373,59 @@ final class GGUF {
         alignment = (int) metadata.getOrDefault("general.alignment", DEFAULT_ALIGNMENT);
         assert Integer.bitCount(alignment) == 1 : "alignment must be a power of two";
         return alignment;
+    }
+
+    enum MetadataValueType {
+        // The value is a 8-bit unsigned integer.
+        // (represented as signed byte in Java)
+        UINT8(1),
+        // The value is a 8-bit signed integer.
+        INT8(1),
+        // The value is a 16-bit unsigned little-endian integer.
+        UINT16(2),
+        // The value is a 16-bit signed little-endian integer.
+        INT16(2),
+        // The value is a 32-bit unsigned little-endian integer.
+        UINT32(4),
+        // The value is a 32-bit signed little-endian integer.
+        INT32(4),
+        // The value is a 32-bit IEEE754 floating point number.
+        FLOAT32(4),
+        // The value is a boolean.
+        // 1-byte value where 0 is false and 1 is true.
+        // Anything else is invalid, and should be treated as either the model being invalid or the reader being buggy.
+        // (0 = false, 1 = true)
+        BOOL(1),
+        // The value is a UTF-8 non-null-terminated string, with length prepended.
+        // Variable-size payload (length-prefixed), therefore byteSize is marked as -8.
+        STRING(-8),
+        // The value is an array of other values, with element type and length prepended.
+        // Arrays can be nested.
+        // Variable-size payload, therefore byteSize is marked as -8.
+        ARRAY(-8),
+        // The value is a 64-bit unsigned little-endian integer.
+        UINT64(8),
+        // The value is a 64-bit signed little-endian integer.
+        INT64(8),
+        // The value is a 64-bit IEEE754 floating point number.
+        FLOAT64(8);
+
+        private static final MetadataValueType[] VALUES = values();
+        private final int byteSize;
+
+        MetadataValueType(int byteSize) {
+            this.byteSize = byteSize;
+        }
+
+        public static MetadataValueType fromIndex(int index) {
+            return VALUES[index];
+        }
+
+        public int byteSize() {
+            return byteSize;
+        }
+    }
+
+    public record GGUFTensorInfo(String name, int[] dimensions, GGMLType ggmlType, long offset) {
     }
 }

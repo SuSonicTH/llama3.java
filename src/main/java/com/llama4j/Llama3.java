@@ -12,7 +12,10 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
+import java.util.Set;
 import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 
@@ -57,13 +60,15 @@ public class Llama3 {
         }
         int startPosition = 0;
         Scanner in = new Scanner(System.in);
-        loop: while (true) {
+        loop:
+        while (true) {
             System.out.print("> ");
             System.out.flush();
             String userText = in.nextLine();
             switch (userText) {
                 case "/quit":
-                case "/exit": break loop;
+                case "/exit":
+                    break loop;
                 case "/context": {
                     System.out.printf("%d out of %d context tokens used (%d tokens remaining)%n",
                             conversationTokens.size(),
@@ -130,6 +135,21 @@ public class Llama3 {
         if (!options.stream()) {
             String responseText = model.tokenizer().decode(responseTokens);
             System.out.println(responseText);
+        }
+    }
+
+    static void main(String[] args) throws IOException {
+        Options options = Options.parseOptions(args);
+        Llama model = AOT.tryUsePreLoaded(options.modelPath(), options.maxTokens());
+        if (model == null) {
+            // No compatible preloaded model found, fallback to fully parse and load the specified file.
+            model = ModelLoader.loadModel(options.modelPath(), options.maxTokens(), true);
+        }
+        Sampler sampler = selectSampler(model.configuration().vocabularySize, options.temperature(), options.topp(), options.seed());
+        if (options.interactive()) {
+            runInteractive(model, sampler, options);
+        } else {
+            runInstructOnce(model, sampler, options);
         }
     }
 
@@ -228,21 +248,6 @@ public class Llama3 {
                 }
             }
             return new Options(modelPath, prompt, systemPrompt, interactive, temperature, topp, seed, maxTokens, stream, echo);
-        }
-    }
-
-    public static void main(String[] args) throws IOException {
-        Options options = Options.parseOptions(args);
-        Llama model = AOT.tryUsePreLoaded(options.modelPath(), options.maxTokens());
-        if (model == null) {
-            // No compatible preloaded model found, fallback to fully parse and load the specified file.
-            model = ModelLoader.loadModel(options.modelPath(), options.maxTokens(), true);
-        }
-        Sampler sampler = selectSampler(model.configuration().vocabularySize, options.temperature(), options.topp(), options.seed());
-        if (options.interactive()) {
-            runInteractive(model, sampler, options);
-        } else {
-            runInstructOnce(model, sampler, options);
         }
     }
 }

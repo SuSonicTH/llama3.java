@@ -17,6 +17,22 @@ final class F32FloatTensor extends FloatTensor {
         this.memorySegment = memorySegment;
     }
 
+    private static float vectorDot(F32FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
+        FloatVector val = FloatVector.zero(F_SPECIES);
+        int upperBound = F_SPECIES.loopBound(size);
+        for (int i = 0; i < upperBound; i += F_SPECIES.length()) {
+            FloatVector thatVector = that.getFloatVector(F_SPECIES, thatOffset + i);
+            FloatVector thizVector = FloatVector.fromMemorySegment(F_SPECIES, thiz.memorySegment, (thisOffset + i) * (long) Float.BYTES, ByteOrder.LITTLE_ENDIAN);
+            val = thizVector.fma(thatVector, val);
+        }
+        float result = val.reduceLanes(VectorOperators.ADD);
+        // Remaining entries.
+        if (upperBound < size) {
+            result += scalarDot(thiz, thisOffset + upperBound, that, thatOffset + upperBound, size - upperBound);
+        }
+        return result;
+    }
+
     @Override
     int size() {
         return size;
@@ -53,21 +69,5 @@ final class F32FloatTensor extends FloatTensor {
         } else {
             return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
         }
-    }
-
-    private static float vectorDot(F32FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
-        FloatVector val = FloatVector.zero(F_SPECIES);
-        int upperBound = F_SPECIES.loopBound(size);
-        for (int i = 0; i < upperBound; i += F_SPECIES.length()) {
-            FloatVector thatVector = that.getFloatVector(F_SPECIES, thatOffset + i);
-            FloatVector thizVector = FloatVector.fromMemorySegment(F_SPECIES, thiz.memorySegment, (thisOffset + i) * (long) Float.BYTES, ByteOrder.LITTLE_ENDIAN);
-            val = thizVector.fma(thatVector, val);
-        }
-        float result = val.reduceLanes(VectorOperators.ADD);
-        // Remaining entries.
-        if (upperBound < size) {
-            result += scalarDot(thiz, thisOffset + upperBound, that, thatOffset + upperBound, size - upperBound);
-        }
-        return result;
     }
 }

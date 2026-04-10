@@ -21,26 +21,6 @@ final class Q4_KFloatTensor extends FloatTensor {
         this.memorySegment = memorySegment;
     }
 
-    @Override
-    int size() {
-        return size;
-    }
-
-    @Override
-    public void setFloat(int index, float value) {
-        throw new UnsupportedOperationException("setFloat");
-    }
-
-    @Override
-    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
-        throw new UnsupportedOperationException("getFloatVector");
-    }
-
-    @Override
-    public GGMLType type() {
-        return GGMLType.Q4_K;
-    }
-
     // Decode 6-bit scale/min values from the packed 12-byte K-quant scale table.
     // ggml layout stores eight values with mixed low/high-bit packing.
     static int getScaleMinK4(int j, MemorySegment mem, long scalesOffset, boolean isMin) {
@@ -55,55 +35,6 @@ final class Q4_KFloatTensor extends FloatTensor {
                 : (Byte.toUnsignedInt(readByte(mem, scalesOffset + lowIdx)) & 0xF);
         int high = (Byte.toUnsignedInt(readByte(mem, scalesOffset + highIdx)) >> 6) & 0x3;
         return low | (high << 4);
-    }
-
-    @Override
-    public float getFloat(long index) {
-        // Q4_K block layout (256 values):
-        // - d (fp16), dmin (fp16)
-        // - scales[12] packed (8 scales + 8 mins, each 6-bit)
-        // - qs[128] packed nibbles (two 4-bit quants per byte)
-        long blockIndex = index / BLOCK_SIZE;
-        int withinBlock = (int) (index % BLOCK_SIZE);
-        long blockOffset = blockIndex * TYPE_SIZE;
-        float d = readFloat16(memorySegment, blockOffset);
-        float dmin = readFloat16(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES);
-        long scalesOffset = blockOffset + 2L * GGMLType.FLOAT16_BYTES;
-        long qsOffset = blockOffset + 2L * GGMLType.FLOAT16_BYTES + 12;
-
-        // Each group of 64 values uses two sub-blocks:
-        // - low nibble half (32 values)
-        // - high nibble half (32 values)
-        int group = withinBlock / 64;
-        int inGroup = withinBlock % 64;
-        int subBlock;
-        int nibbleIndex;
-        boolean isHigh;
-        if (inGroup < 32) {
-            subBlock = group * 2;
-            nibbleIndex = inGroup;
-            isHigh = false;
-        } else {
-            subBlock = group * 2 + 1;
-            nibbleIndex = inGroup - 32;
-            isHigh = true;
-        }
-
-        int sc = getScaleMinK4(subBlock, memorySegment, scalesOffset, false);
-        int m = getScaleMinK4(subBlock, memorySegment, scalesOffset, true);
-
-        byte qsByte = readByte(memorySegment, qsOffset + group * 32L + nibbleIndex);
-        int quant = isHigh ? ((Byte.toUnsignedInt(qsByte) >> 4) & 0xF) : (Byte.toUnsignedInt(qsByte) & 0xF);
-
-        return d * sc * quant - dmin * m;
-    }
-
-    @Override
-    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
-        if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
-        }
-        return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
     }
 
     private static float vectorDot(Q4_KFloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
@@ -191,5 +122,74 @@ final class Q4_KFloatTensor extends FloatTensor {
         }
 
         return result;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.Q4_K;
+    }
+
+    @Override
+    public float getFloat(long index) {
+        // Q4_K block layout (256 values):
+        // - d (fp16), dmin (fp16)
+        // - scales[12] packed (8 scales + 8 mins, each 6-bit)
+        // - qs[128] packed nibbles (two 4-bit quants per byte)
+        long blockIndex = index / BLOCK_SIZE;
+        int withinBlock = (int) (index % BLOCK_SIZE);
+        long blockOffset = blockIndex * TYPE_SIZE;
+        float d = readFloat16(memorySegment, blockOffset);
+        float dmin = readFloat16(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES);
+        long scalesOffset = blockOffset + 2L * GGMLType.FLOAT16_BYTES;
+        long qsOffset = blockOffset + 2L * GGMLType.FLOAT16_BYTES + 12;
+
+        // Each group of 64 values uses two sub-blocks:
+        // - low nibble half (32 values)
+        // - high nibble half (32 values)
+        int group = withinBlock / 64;
+        int inGroup = withinBlock % 64;
+        int subBlock;
+        int nibbleIndex;
+        boolean isHigh;
+        if (inGroup < 32) {
+            subBlock = group * 2;
+            nibbleIndex = inGroup;
+            isHigh = false;
+        } else {
+            subBlock = group * 2 + 1;
+            nibbleIndex = inGroup - 32;
+            isHigh = true;
+        }
+
+        int sc = getScaleMinK4(subBlock, memorySegment, scalesOffset, false);
+        int m = getScaleMinK4(subBlock, memorySegment, scalesOffset, true);
+
+        byte qsByte = readByte(memorySegment, qsOffset + group * 32L + nibbleIndex);
+        int quant = isHigh ? ((Byte.toUnsignedInt(qsByte) >> 4) & 0xF) : (Byte.toUnsignedInt(qsByte) & 0xF);
+
+        return d * sc * quant - dmin * m;
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        }
+        return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
     }
 }

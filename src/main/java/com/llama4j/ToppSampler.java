@@ -3,14 +3,10 @@ package com.llama4j;
 import java.util.Comparator;
 import java.util.random.RandomGenerator;
 
-final class ToppSampler implements Sampler {
+record ToppSampler(int[] indices, float topp, RandomGenerator rng) implements Sampler {
 
-    final int[] indices;
-    final float topp;
-    final RandomGenerator rng;
-
-    public ToppSampler(int maxNumberOfElements, float topp, RandomGenerator rng) {
-        this.indices = new int[maxNumberOfElements];
+    ToppSampler(int indices, float topp, RandomGenerator rng) {
+        this.indices = new int[indices];
         this.topp = topp;
         this.rng = rng;
     }

@@ -18,41 +18,6 @@ final class F16FloatTensor extends FloatTensor {
         this.memorySegment = memorySegment;
     }
 
-    @Override
-    int size() {
-        return size;
-    }
-
-    @Override
-    public void setFloat(int index, float value) {
-        throw new UnsupportedOperationException("setFloat");
-    }
-
-    @Override
-    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
-        throw new UnsupportedOperationException("getFloatVector");
-    }
-
-    @Override
-    public GGMLType type() {
-        return GGMLType.F16;
-    }
-
-    @Override
-    public float getFloat(long index) {
-        assert 0 <= index && index < size;
-        return readFloat16(memorySegment, index * GGMLType.FLOAT16_BYTES);
-    }
-
-    @Override
-    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
-        if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
-        } else {
-            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
-        }
-    }
-
     private static float vectorDot(F16FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
         assert S_SPECIES_HALF.length() == F_SPECIES.length();
         FloatVector val = FloatVector.zero(F_SPECIES);
@@ -101,5 +66,40 @@ final class F16FloatTensor extends FloatTensor {
         }
 
         return result;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.F16;
+    }
+
+    @Override
+    public float getFloat(long index) {
+        assert 0 <= index && index < size;
+        return readFloat16(memorySegment, index * GGMLType.FLOAT16_BYTES);
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        } else {
+            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
+        }
     }
 }

@@ -3,9 +3,6 @@ package com.llama4j;
 import java.util.concurrent.TimeUnit;
 
 interface Timer extends AutoCloseable {
-    @Override
-    void close(); // no Exception
-
     static Timer log(String label) {
         return log(label, TimeUnit.MILLISECONDS);
     }
@@ -23,4 +20,7 @@ interface Timer extends AutoCloseable {
             }
         };
     }
+
+    @Override
+    void close(); // no Exception
 }

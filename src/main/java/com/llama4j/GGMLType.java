@@ -43,36 +43,14 @@ enum GGMLType {
 
     public static final int BFLOAT16_BYTES = 2;
     public static final int FLOAT16_BYTES = 2;
-
+    public static final int QK_K = 256; // or 64?
     private static final GGMLType[] VALUES = values();
-
     private final int typeSize;
-
     private final int blockSize;
-
-    public int getTypeSize() {
-        return typeSize;
-    }
-
-    public int getBlockSize() {
-        return blockSize;
-    }
-
-    public static GGMLType fromId(int id) {
-        return VALUES[id];
-    }
 
     GGMLType(int typeSize) {
         this(typeSize, 1);
     }
-
-    public long byteSizeFor(long numberOfElements) {
-        long t = numberOfElements * (long) getTypeSize();
-        assert t % getBlockSize() == 0;
-        return t / getBlockSize();
-    }
-
-    public static final int QK_K = 256; // or 64?
 
     GGMLType(int typeSize, int blockSize) {
         assert blockSize > 0;
@@ -82,7 +60,25 @@ enum GGMLType {
         this.blockSize = blockSize;
     }
 
+    public static GGMLType fromId(int id) {
+        return VALUES[id];
+    }
+
     private static boolean isPowerOf2(int n) {
         return n > 0 && (n & (n - 1)) == 0;
+    }
+
+    public int getTypeSize() {
+        return typeSize;
+    }
+
+    public int getBlockSize() {
+        return blockSize;
+    }
+
+    public long byteSizeFor(long numberOfElements) {
+        long t = numberOfElements * (long) getTypeSize();
+        assert t % getBlockSize() == 0;
+        return t / getBlockSize();
     }
 }

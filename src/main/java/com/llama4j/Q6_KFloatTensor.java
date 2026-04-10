@@ -21,87 +21,6 @@ final class Q6_KFloatTensor extends FloatTensor {
         this.memorySegment = memorySegment;
     }
 
-    @Override
-    int size() {
-        return size;
-    }
-
-    @Override
-    public void setFloat(int index, float value) {
-        throw new UnsupportedOperationException("setFloat");
-    }
-
-    @Override
-    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
-        throw new UnsupportedOperationException("getFloatVector");
-    }
-
-    @Override
-    public GGMLType type() {
-        return GGMLType.Q6_K;
-    }
-
-    @Override
-    public float getFloat(long index) {
-        // Q6_K block layout (256 values):
-        // - ql[128]: low 4 bits for two halves
-        // - qh[64]: two extra bits per quant
-        // - scales[16]: signed int8 per 16-value stripe
-        // - d (fp16): shared block scale
-        long blockIndex = index / BLOCK_SIZE;
-        int withinBlock = (int) (index % BLOCK_SIZE);
-        long blockOffset = blockIndex * TYPE_SIZE;
-        long qlOff = blockOffset;
-        long qhOff = blockOffset + 128;
-        long scOff = blockOffset + 192;
-        float d = readFloat16(memorySegment, blockOffset + 192 + 16);
-
-        // Two 128-value halves per block.
-        int half = withinBlock / 128;
-        int rem128 = withinBlock % 128;
-        int sub32 = rem128 / 32;
-        int l = rem128 % 32;
-
-        long qlBase = qlOff + half * 64L;
-        long qhBase = qhOff + half * 32L;
-
-        int qlNibble;
-        int qhShift;
-        switch (sub32) {
-            case 0 -> {
-                qlNibble = Byte.toUnsignedInt(readByte(memorySegment, qlBase + l)) & 0xF;
-                qhShift = 0;
-            }
-            case 1 -> {
-                qlNibble = Byte.toUnsignedInt(readByte(memorySegment, qlBase + 32 + l)) & 0xF;
-                qhShift = 2;
-            }
-            case 2 -> {
-                qlNibble = (Byte.toUnsignedInt(readByte(memorySegment, qlBase + l)) >> 4) & 0xF;
-                qhShift = 4;
-            }
-            case 3 -> {
-                qlNibble = (Byte.toUnsignedInt(readByte(memorySegment, qlBase + 32 + l)) >> 4) & 0xF;
-                qhShift = 6;
-            }
-            default -> throw new IllegalStateException();
-        }
-
-        int qhBits = (Byte.toUnsignedInt(readByte(memorySegment, qhBase + l)) >> qhShift) & 3;
-        int q6 = (qlNibble | (qhBits << 4)) - 32;
-        int sc = readByte(memorySegment, scOff + half * 8L + sub32 * 2L + l / 16); // signed int8
-
-        return d * sc * q6;
-    }
-
-    @Override
-    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
-        if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
-        }
-        return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
-    }
-
     private static float vectorDot(Q6_KFloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
         float result = 0f;
         int j = 0;
@@ -211,5 +130,86 @@ final class Q6_KFloatTensor extends FloatTensor {
         }
 
         return result;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.Q6_K;
+    }
+
+    @Override
+    public float getFloat(long index) {
+        // Q6_K block layout (256 values):
+        // - ql[128]: low 4 bits for two halves
+        // - qh[64]: two extra bits per quant
+        // - scales[16]: signed int8 per 16-value stripe
+        // - d (fp16): shared block scale
+        long blockIndex = index / BLOCK_SIZE;
+        int withinBlock = (int) (index % BLOCK_SIZE);
+        long blockOffset = blockIndex * TYPE_SIZE;
+        long qlOff = blockOffset;
+        long qhOff = blockOffset + 128;
+        long scOff = blockOffset + 192;
+        float d = readFloat16(memorySegment, blockOffset + 192 + 16);
+
+        // Two 128-value halves per block.
+        int half = withinBlock / 128;
+        int rem128 = withinBlock % 128;
+        int sub32 = rem128 / 32;
+        int l = rem128 % 32;
+
+        long qlBase = qlOff + half * 64L;
+        long qhBase = qhOff + half * 32L;
+
+        int qlNibble;
+        int qhShift;
+        switch (sub32) {
+            case 0 -> {
+                qlNibble = Byte.toUnsignedInt(readByte(memorySegment, qlBase + l)) & 0xF;
+                qhShift = 0;
+            }
+            case 1 -> {
+                qlNibble = Byte.toUnsignedInt(readByte(memorySegment, qlBase + 32 + l)) & 0xF;
+                qhShift = 2;
+            }
+            case 2 -> {
+                qlNibble = (Byte.toUnsignedInt(readByte(memorySegment, qlBase + l)) >> 4) & 0xF;
+                qhShift = 4;
+            }
+            case 3 -> {
+                qlNibble = (Byte.toUnsignedInt(readByte(memorySegment, qlBase + 32 + l)) >> 4) & 0xF;
+                qhShift = 6;
+            }
+            default -> throw new IllegalStateException();
+        }
+
+        int qhBits = (Byte.toUnsignedInt(readByte(memorySegment, qhBase + l)) >> qhShift) & 3;
+        int q6 = (qlNibble | (qhBits << 4)) - 32;
+        int sc = readByte(memorySegment, scOff + half * 8L + sub32 * 2L + l / 16); // signed int8
+
+        return d * sc * q6;
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        }
+        return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
     }
 }

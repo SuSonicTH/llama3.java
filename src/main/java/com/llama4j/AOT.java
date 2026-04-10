@@ -17,8 +17,6 @@ import java.util.Objects;
  * iff the specified and preloaded file names (base name) match.
  */
 final class AOT {
-    record PartialModel(String modelFileName, Llama model, long tensorDataOffset, Map<String, GGUF.GGUFTensorInfo> tensorInfos) {}
-
     private static final PartialModel PRELOADED_GGUF = preLoadGGUF(System.getProperty("llama.PreloadGGUF"));
 
     private static PartialModel preLoadGGUF(String modelPath) {
@@ -68,5 +66,8 @@ final class AOT {
             Llama.Weights weights = ModelLoader.loadWeights(tensorEntries, baseModel.configuration());
             return new Llama(baseModel.configuration().withContextLength(contextLength), baseModel.tokenizer(), weights);
         }
+    }
+
+    record PartialModel(String modelFileName, Llama model, long tensorDataOffset, Map<String, GGUF.GGUFTensorInfo> tensorInfos) {
     }
 }
