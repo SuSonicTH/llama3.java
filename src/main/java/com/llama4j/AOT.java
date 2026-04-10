@@ -32,7 +32,7 @@ final class AOT {
                 GGUF gguf = GGUF.loadModel(fileChannel, path.toString());
                 return new PartialModel(
                         path.getFileName().toString(),
-                        ModelLoader.loadModel(fileChannel, gguf, Llama3.Options.DEFAULT_MAX_TOKENS, false),
+                        ModelLoader.loadModel(fileChannel, gguf, Options.DEFAULT_MAX_TOKENS, false),
                         gguf.getTensorDataOffset(),
                         gguf.getTensorInfos()
                 );
@@ -63,7 +63,7 @@ final class AOT {
              var fileChannel = FileChannel.open(modelPath, StandardOpenOption.READ)) {
             // Load only the tensors (mmap slices).
             Map<String, GGMLTensorEntry> tensorEntries = GGUF.loadTensors(fileChannel, preLoaded.tensorDataOffset(), preLoaded.tensorInfos());
-            Llama.Weights weights = ModelLoader.loadWeights(tensorEntries, baseModel.configuration());
+            Weights weights = ModelLoader.loadWeights(tensorEntries, baseModel.configuration());
             return new Llama(baseModel.configuration().withContextLength(contextLength), baseModel.tokenizer(), weights);
         }
     }

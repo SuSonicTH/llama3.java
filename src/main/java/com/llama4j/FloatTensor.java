@@ -15,7 +15,7 @@ import java.util.Arrays;
  * Not a strict tensor, but rather just a sequence of floats, not required to be backed by memory
  * e.g. can represent a sequence of quantized floats.
  */
-abstract class FloatTensor {
+public abstract class FloatTensor {
     static final int VECTOR_BIT_SIZE = Integer.getInteger("llama.VectorBitSize", VectorShape.preferredShape().vectorBitSize());
     static final boolean USE_VECTOR_API = VECTOR_BIT_SIZE != 0;
 
@@ -265,18 +265,5 @@ abstract class FloatTensor {
         return this;
     }
 
-    @FunctionalInterface
-    interface AggregateFunction {
-        float apply(float acc, float value);
-    }
 
-    @FunctionalInterface
-    interface MapFunction {
-        float apply(float value);
-    }
-
-    @FunctionalInterface
-    interface MapWithIndexFunction {
-        float apply(float value, int index);
-    }
 }
