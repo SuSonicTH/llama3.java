@@ -6,9 +6,7 @@ import java.util.random.RandomGenerator;
 record ToppSampler(int[] indices, float topp, RandomGenerator rng) implements Sampler {
 
     ToppSampler(int indices, float topp, RandomGenerator rng) {
-        this.indices = new int[indices];
-        this.topp = topp;
-        this.rng = rng;
+        this(new int[indices], topp, rng);
     }
 
     static void swap(int[] array, int from, int to) {
