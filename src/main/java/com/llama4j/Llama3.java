@@ -1,22 +1,11 @@
-///usr/bin/env jbang "$0" "$@" ; exit $?
-//JAVA 21+
-//PREVIEW
-//COMPILE_OPTIONS --add-modules=jdk.incubator.vector
-//RUNTIME_OPTIONS --add-modules=jdk.incubator.vector -Djdk.incubator.vector.VECTOR_ACCESS_OOB_CHECK=0
-//MAIN com.llama4j.Llama3
-
-// Practical Llama 3 (and 3.1) inference in a single Java file
+// Practical Llama 3 (and 3.1) inference in Java
 // Author: Alfonso² Peterssen
 // Based on Andrej Karpathy's llama2.c and minbpe projects
 //
 // Supports llama.cpp's GGUF format with Q4_0/Q4_1/Q4_K/Q5_K/Q6_K/Q8_0/F16/BF16/F32 weights
 // Multi-threaded matrix vector multiplication routines implemented using Java's Vector API
 // Simple CLI with --chat and --instruct mode
-//
-// To run just:
-// jbang Llama3.java --help
-//
-// Enjoy!
+
 package com.llama4j;
 
 import jdk.incubator.vector.*;

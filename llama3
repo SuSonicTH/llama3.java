@@ -1,0 +1,2 @@
+#!/bin/sh
+java --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar target/llama3-1.0-SNAPSHOT.jar "$@"
